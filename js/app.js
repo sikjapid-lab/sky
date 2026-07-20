@@ -1,25 +1,52 @@
 // ==========================================
-// ۱. لایه‌های نقشه پایه دوبعدی (Leaflet)
+// ۱. لایه‌های نقشه پایه دوبعدی (Leaflet - 2D Base Layers)
 // ==========================================
-const baseMaps = {
+const leafletBaseMaps = {
     "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
     "Google Hybrid": L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
-    "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: 'OSM' })
+    "Google Terrain": L.tileLayer('https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
+    "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: 'CARTO' }),
+    "CartoDB Positron": L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: 'CARTO' }),
+    "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: 'OSM' }),
+    "Esri World Imagery": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Esri' })
 };
 
 const map = L.map('map', {
     center: [30.0, 50.0],
     zoom: 5,
-    layers: [baseMaps["Google Satellite"]],
+    layers: [leafletBaseMaps["Google Satellite"]],
     zoomControl: false
 });
 
-L.control.layers(baseMaps, null, { position: 'bottomleft' }).addTo(map);
-L.control.zoom({ position: 'bottomleft' }).addTo(map);
+// کنترل مستقل لایه‌های پنل ۲D (سمت راست)
+L.control.layers(leafletBaseMaps, null, { position: 'topright' }).addTo(map);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 // ==========================================
-// ۲. مقداردهی و بارگذاری لایه معتبر کره سه‌بعدی (Cesium Globe)
+// ۲. لایه‌های نقشه پایه سه‌بعدی (Cesium - 3D Base Layers)
 // ==========================================
+const cesiumProviders = {
+    'google-sat': new Cesium.UrlTemplateImageryProvider({
+        url: 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+        maximumLevel: 20
+    }),
+    'google-hybrid': new Cesium.UrlTemplateImageryProvider({
+        url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+        maximumLevel: 20
+    }),
+    'osm': new Cesium.OpenStreetMapImageryProvider({
+        url: 'https://a.tile.openstreetmap.org/'
+    }),
+    'carto-dark': new Cesium.UrlTemplateImageryProvider({
+        url: 'https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png',
+        maximumLevel: 19
+    }),
+    'esri-imagery': new Cesium.UrlTemplateImageryProvider({
+        url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        maximumLevel: 18
+    })
+};
+
 let cesiumViewer = null;
 let cesiumEntities = {};
 let isSyncing = false;
@@ -27,14 +54,9 @@ let isSyncing = false;
 function initCesium() {
     if (cesiumViewer) return;
 
-    // لایه کاشی‌های ماهواره‌ای استاندارد بدون نیاز به Token
-    const esriProvider = new Cesium.UrlTemplateImageryProvider({
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 18
-    });
-
+    // بارگذاری پیش‌فرض کره ۳D با لایه ماهواره‌ای باکیفیت گوگل
     cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-        imageryProvider: esriProvider,
+        imageryProvider: cesiumProviders['google-sat'],
         animation: false,
         timeline: false,
         baseLayerPicker: false,
@@ -42,18 +64,30 @@ function initCesium() {
         geocoder: false,
         sceneModePicker: false,
         infoBox: false,
-        selectionIndicator: false
+        selectionIndicator: false,
+        skyBox: false // پس زمینه تاریک کهکشانی
     });
 
-    cesiumViewer.scene.globe.enableLighting = false; // خاموش کردن افکت شب جهت شفافیت همیشگی زمین
+    cesiumViewer.scene.globe.enableLighting = false; // عدم استفاده از سایه شب برای شفافیت دائمی کره
+    cesiumViewer.scene.globe.showWaterEffect = true;
 
-    // همگام‌سازی حرکت دوربین Cesium با Leaflet
+    // اتصال ایونت تغییر موقعیت دوربین ۳D جهت همگام سازی
     cesiumViewer.camera.percentageChanged = 0.01;
     cesiumViewer.camera.changed.addEventListener(sync2DFrom3D);
 }
 
+// تغییر بیس لایر مستقل پنل ۳D
+function changeCesiumBaseLayer(layerKey) {
+    if (!cesiumViewer) return;
+    const imageryLayers = cesiumViewer.imageryLayers;
+    imageryLayers.removeAll();
+    if (cesiumProviders[layerKey]) {
+        imageryLayers.addImageryProvider(cesiumProviders[layerKey]);
+    }
+}
+
 // ==========================================
-// ۳. الگوریتم همگام‌سازی دوطرفه (Sync Engine)
+// ۳. موتور سینک دوطرفه (2-Way Camera Sync)
 // ==========================================
 map.on('move', sync3DFrom2D);
 
@@ -63,8 +97,6 @@ function sync3DFrom2D() {
 
     const center = map.getCenter();
     const zoom = map.getZoom();
-    
-    // تبدیل سطح زوم Leaflet به ارتفاع دوربین Cesium
     const altitude = 40000000 / Math.pow(2, zoom);
 
     cesiumViewer.camera.setView({
@@ -83,7 +115,6 @@ function sync2DFrom3D() {
     const lng = Cesium.Math.toDegrees(cartographic.longitude);
     const height = cartographic.height;
 
-    // تبدیل ارتفاع Cesium به زوم Leaflet
     const zoom = Math.round(Math.log2(40000000 / height));
 
     map.setView([lat, lng], Math.min(Math.max(zoom, 2), 18), { animate: false });
@@ -91,7 +122,6 @@ function sync2DFrom3D() {
     setTimeout(() => { isSyncing = false; }, 50);
 }
 
-// تغییر حالت‌های نمایش (دوبعدی / سه‌بعدی / دو پنله)
 function setContainerMode(mode) {
     const container = document.getElementById('map-container');
     document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('active'));
@@ -116,11 +146,10 @@ function setContainerMode(mode) {
 }
 
 // ==========================================
-// ۴. دریافت و رندر داده‌های پرواز
+// ۴. دریافت و رندر زنده داده‌های ADSB
 // ==========================================
 const aircraftMarkers = {};
 let allFlightsData = [];
-let mainPollingTimer = null;
 
 function getAltitudeColor(alt) {
     if (alt <= 0) return '#22c55e';
@@ -254,7 +283,7 @@ function toggleTable() {
 
 function filterFlights() { renderFlights2D(allFlightsData); }
 
-// راه اندازی
+// راه‌اندازی اولیه
 initCesium();
 fetchLiveGlobalFlights();
 setInterval(fetchLiveGlobalFlights, 4000);
