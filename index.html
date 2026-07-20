@@ -24,7 +24,7 @@
             right: 10px;
             height: 55px;
             z-index: 2000;
-            background: rgba(15, 23, 42, 0.85);
+            background: rgba(15, 23, 42, 0.88);
             backdrop-filter: blur(12px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 12px;
@@ -36,7 +36,7 @@
         }
 
         .brand-title { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 0.95rem; color: #38bdf8; }
-        .controls-group { display: flex; align-items: center; gap: 12px; }
+        .controls-group { display: flex; align-items: center; gap: 10px; }
 
         .input-box {
             background: rgba(30, 41, 59, 0.8);
@@ -52,7 +52,7 @@
             background: #0284c7;
             color: #fff;
             border: none;
-            padding: 6px 14px;
+            padding: 6px 12px;
             border-radius: 6px;
             font-size: 0.82rem;
             cursor: pointer;
@@ -72,7 +72,34 @@
         #map, #cesiumContainer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
         #cesiumContainer { display: none; z-index: 1000; }
 
-        /* پنل دوربین ۳D */
+        /* جدول کشویی پروازها */
+        #table-container {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            height: 250px;
+            background: rgba(15, 23, 42, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            z-index: 2000;
+            overflow-y: auto;
+            transition: all 0.3s ease-in-out;
+            box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+        }
+        #table-container.table-hidden {
+            transform: translateY(120%);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: center; }
+        th { background: rgba(30, 41, 59, 0.9); color: #38bdf8; padding: 10px; position: sticky; top: 0; }
+        td { padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        tr:hover { background: rgba(56, 189, 248, 0.1); }
+
+        /* کنترلرهای دوربین ۳D */
         #camera-controls {
             position: absolute;
             bottom: 20px;
@@ -102,10 +129,28 @@
             <div class="stat-badge">کل: <span id="flight-count">۰</span></div>
             <div class="stat-badge">نمایشی: <span id="visible-count">۰</span></div>
 
-            <button class="btn-action" onclick="toggleTable()"><i class="fa-solid fa-table-list"></i> جدول</button>
+            <button class="btn-action" onclick="toggleTable()"><i class="fa-solid fa-table-list"></i> جدول پروازها</button>
             <button class="btn-action" onclick="clearTrails()"><i class="fa-solid fa-eraser"></i> پاکسازی مسیر</button>
             <button class="btn-action btn-3d" id="btn-toggle-3d" onclick="toggle3DMode()"><i class="fa-solid fa-cube"></i> حالت ۳D Glob</button>
         </div>
+    </div>
+
+    <!-- جدول پروازها -->
+    <div id="table-container" class="table-hidden">
+        <table>
+            <thead>
+                <tr>
+                    <th>Callsign</th>
+                    <th>Reg</th>
+                    <th>Type</th>
+                    <th>Hex</th>
+                    <th>ارتفاع (ft)</th>
+                    <th>سرعت (km/h)</th>
+                    <th>عملیات</th>
+                </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+        </table>
     </div>
 
     <!-- کنترلرهای دوربین سزیوم -->
