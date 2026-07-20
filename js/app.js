@@ -1,3 +1,4 @@
+// لایه‌های نقشه پایه
 const baseMaps = {
     "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
     "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CARTO', subdomains: 'abcd', maxZoom: 19 })
@@ -25,10 +26,15 @@ function getAltitudeColor(alt) {
 const aircraftMarkers = {};
 const flightTrails = {};
 let allFlightsData = [];
-let updateTimer = null;
+
+// متغیرهای کنترل ترافیک و عدم درخواست مکرر
+let mainPollingTimer = null;
 let moveDebounceTimer = null;
 let selectedHex = null;
-let currentFetchController = null; // جهت لغو درخواست‌های قدیمی
+let currentFetchController = null;
+let lastFetchedKey = "";
+let lastFetchTime = 0;
+let currentFetchInterval = 8000; // پیش‌فرض ۸ ثانیه برای جلوگیری از Rate Limit
 
 function createPlaneIcon(heading, altFeet, isSelected = false) {
     const angle = heading || 0;
@@ -44,25 +50,33 @@ function createPlaneIcon(heading, altFeet, isSelected = false) {
     });
 }
 
-// واکشی داده‌های زنده با کنترل همزمانی و لغو درخواست پیشین
+// تابع اصلی دریافت داده‌های زنده با کنترل هوشمند ترافیک
 async function fetchLiveGlobalFlights() {
-    // لغو درخواست قبلی در صورت معلق بودن
+    const center = map.getCenter();
+    const lat = center.lat.toFixed(1); // گرد کردن جهت کاهش کلیدهای تکراری
+    const lon = center.lng.toFixed(1);
+    const currentKey = `${lat}_${lon}`;
+    const now = Date.now();
+
+    // کش کلاینت: اگر جابه‌جایی کمتر از ۰.۱ درجه بوده و کمتر از ۶ ثانیه گذشته، درخواست مجدد نفرست
+    if (currentKey === lastFetchedKey && (now - lastFetchTime) < 6000) {
+        return;
+    }
+
+    // لغو درخواست پیشین اگر هنوز معلق است
     if (currentFetchController) {
         currentFetchController.abort();
     }
     currentFetchController = new AbortController();
 
     try {
-        const center = map.getCenter();
-        const lat = center.lat.toFixed(2);
-        const lon = center.lng.toFixed(2);
-
         const apiUrl = `/api/flights?lat=${lat}&lon=${lon}&dist=3000`;
-
         const response = await fetch(apiUrl, { signal: currentFetchController.signal });
-        
-        if (response.status === 429) {
-            console.warn('محدودیت تعداد درخواست! دریافت داده‌ها متوقف شد.');
+
+        // در صورت مواجهه با محدودیت نرخ (420 یا 429)، زمان بروزرسانی را به ۱۵ ثانیه افزایش بده
+        if (response.status === 420 || response.status === 429) {
+            console.warn('محدودیت نرخ ارسال از سمت API مقصد دریافت شد (HTTP 420/429). افزایش زمان انتظار...');
+            currentFetchInterval = 15000; 
             return;
         }
 
@@ -70,6 +84,11 @@ async function fetchLiveGlobalFlights() {
 
         const data = await response.json();
         const rawAircraft = data.ac || [];
+
+        // بازگشت وضعیت زمان به مقدار نرمال در صورت موفقیت
+        currentFetchInterval = 8000;
+        lastFetchedKey = currentKey;
+        lastFetchTime = Date.now();
 
         allFlightsData = rawAircraft.map(ac => ({
             hex: String(ac.hex || '').toUpperCase(),
@@ -93,7 +112,7 @@ async function fetchLiveGlobalFlights() {
 
     } catch (error) {
         if (error.name !== 'AbortError') {
-            console.error('خطا در دریافت داده‌های زنده:', error);
+            console.error('خطا در دریافت داده‌ها:', error);
         }
     }
 }
@@ -183,13 +202,24 @@ function selectAircraft(hex, lat, lon) {
     });
 }
 
-// مدیریت بهینه حرکت روی نقشه با Debounce (تاخیر ۷۰۰ میلی‌ثانیه‌ای پس از توقف حرکت)
+// تک حلقه تکرار شونده امن (Recursive Timeout) به جای setInterval متداخل
+function startSinglePollingLoop() {
+    clearTimeout(mainPollingTimer);
+    
+    const loop = async () => {
+        await fetchLiveGlobalFlights();
+        mainPollingTimer = setTimeout(loop, currentFetchInterval);
+    };
+    
+    loop();
+}
+
+// مدیریت جابه‌جایی نقشه بدون ایجاد تایمر جدید (فقط فراخوانی بهینه)
 map.on('moveend', function () {
     clearTimeout(moveDebounceTimer);
     moveDebounceTimer = setTimeout(() => {
         fetchLiveGlobalFlights();
-        updateInterval(); // ریست کردن تایمر ۵ ثانیه‌ای پس از جابه‌جایی دستی
-    }, 700);
+    }, 1200); // تاخیر ۱.۲ ثانیه‌ای برای اطمینان از اتمام جابه‌جایی نقشه توسط کاربر
 });
 
 map.on('mousemove', function (e) {
@@ -230,9 +260,10 @@ function filterFlights() { renderFlights(allFlightsData); }
 
 function updateInterval() {
     const refreshEl = document.getElementById('refresh-rate');
-    const seconds = refreshEl ? parseInt(refreshEl.value) || 5 : 5;
-    clearInterval(updateTimer);
-    updateTimer = setInterval(fetchLiveGlobalFlights, seconds * 1000);
+    if (refreshEl) {
+        const seconds = parseInt(refreshEl.value) || 8;
+        currentFetchInterval = seconds * 1000;
+    }
 }
 
 function toggleTable() { 
@@ -247,6 +278,5 @@ function clearTrails() {
     });
 }
 
-// اجرای اولیه
-fetchLiveGlobalFlights();
-updateInterval();
+// شروع چرخه دریافت داده‌ها
+startSinglePollingLoop();
