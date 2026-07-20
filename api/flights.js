@@ -1,20 +1,20 @@
 export default async function handler(req, res) {
-    // افزودن هدرهای کامل CORS
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader(
-        'Access-Control-Allow-Headers',
-        'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-    );
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+        return res.status(200).end();
     }
 
     const { lat = 30.0, lon = 50.0, dist = 3000 } = req.query;
-    const targetUrl = `https://api.adsb.lol/v2/lat/${lat}/lon/${lon}/dist/${dist}`;
+    
+    // گرد کردن مختصات برای افزایش نرخ Hit شدن Cache روی Serverless
+    const roundedLat = parseFloat(lat).toFixed(1);
+    const roundedLon = parseFloat(lon).toFixed(1);
+
+    const targetUrl = `https://api.adsb.lol/v2/lat/${roundedLat}/lon/${roundedLon}/dist/${dist}`;
 
     try {
         const response = await fetch(targetUrl, {
@@ -23,16 +23,20 @@ export default async function handler(req, res) {
             }
         });
 
+        if (response.status === 429) {
+            return res.status(429).json({ error: 'Rate limit reached from source API' });
+        }
+
         if (!response.ok) {
-            return res.status(response.status).json({ error: 'خطا در برقراری ارتباط با API مرجع' });
+            return res.status(response.status).json({ error: 'Source API error' });
         }
 
         const data = await response.json();
-        
-        // Cache پاسخ به مدت ۵ ثانیه روی CDN ورسل جهت افزایش سرعت و کاهش فشار
-        res.setHeader('Cache-Control', 's-maxage=5, stale-while-revalidate=10');
+
+        // تنظیم هدر کش ۵ ثانیه‌ای روی CDN ورسل
+        res.setHeader('Cache-Control', 'public, s-maxage=5, stale-while-revalidate=10');
         return res.status(200).json(data);
     } catch (error) {
-        return res.status(500).json({ error: 'خطای داخلی پروکسی Vercel: ' + error.message });
+        return res.status(500).json({ error: 'Internal proxy error: ' + error.message });
     }
 }
