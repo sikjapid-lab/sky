@@ -1,5 +1,6 @@
-export default async function handler(req, res) {
-    res.setHeader('Access-Control-Allow-Credentials', true);
+module.exports = async (req, res) => {
+    // تنظیم هدرهای کامل CORS
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -10,6 +11,7 @@ export default async function handler(req, res) {
 
     const { lat = 30.0, lon = 50.0, dist = 3000 } = req.query;
     
+    // گرد کردن مختصات برای افزایش نرخ Hit شدن Cache
     const roundedLat = parseFloat(lat).toFixed(1);
     const roundedLon = parseFloat(lon).toFixed(1);
 
@@ -35,10 +37,10 @@ export default async function handler(req, res) {
 
         const data = await response.json();
 
-        // کش سبک ۵ ثانیه‌ای روی ورسل
+        // کش سبک ۵ ثانیه‌ای روی Vercel Edge Network
         res.setHeader('Cache-Control', 'public, s-maxage=5, stale-while-revalidate=10');
         return res.status(200).json(data);
     } catch (error) {
         return res.status(500).json({ error: 'Internal proxy error: ' + error.message });
     }
-}
+};
