@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>سامانه پایش هوایی و شبیه‌سازی ۳D</title>
+    <title>سامانه پایش هوایی دو پنله GIS & ADSB</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -24,15 +24,15 @@
             right: 10px;
             height: 55px;
             z-index: 2000;
-            background: rgba(15, 23, 42, 0.9);
+            background: rgba(15, 23, 42, 0.92);
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             padding: 0 15px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
         }
 
         .brand-title { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 0.95rem; color: #38bdf8; }
@@ -68,7 +68,7 @@
         .stat-badge { font-size: 0.8rem; color: #94a3b8; }
         .stat-badge span { color: #4ade80; font-weight: bold; }
 
-        /* کانتینر اصلی دو پنله (Split View) */
+        /* کانتینر اصلی دو پنله */
         #map-container {
             position: absolute;
             top: 0;
@@ -89,6 +89,23 @@
             width: 50%;
             height: 100%;
             position: relative;
+        }
+
+        /* کنترلرهای سوئیچ لایه اختصاصی ۳D */
+        .cesium-layer-picker-custom {
+            position: absolute;
+            top: 75px;
+            left: 15px;
+            z-index: 1500;
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 8px;
+            padding: 6px;
+            color: #fff;
+            font-size: 0.8rem;
+            outline: none;
+            cursor: pointer;
         }
 
         /* حالت‌های نمایش */
@@ -135,7 +152,6 @@
         </div>
 
         <div class="controls-group">
-            <!-- دکمه‌های تغییر حالت نمایش (شبیه عکس دوم) -->
             <button class="btn-action btn-mode active" id="btn-split" onclick="setContainerMode('split')"><i class="fa-solid fa-columns"></i> دوبعدی + سه‌بعدی</button>
             <button class="btn-action btn-mode" id="btn-2d" onclick="setContainerMode('2d')"><i class="fa-solid fa-map"></i> فقط دوبعدی</button>
             <button class="btn-action btn-mode" id="btn-3d" onclick="setContainerMode('3d')"><i class="fa-solid fa-globe"></i> فقط سه‌بعدی</button>
@@ -170,7 +186,18 @@
 
     <!-- کانتینر دو پنله نقشه‌ها -->
     <div id="map-container" class="view-split">
-        <div id="cesiumContainer"></div>
+        <!-- پنل ۳D سمت چپ با انتخاب لایه مستقل -->
+        <div id="cesiumContainer">
+            <select id="cesium-layer-select" class="cesium-layer-picker-custom" onchange="changeCesiumBaseLayer(this.value)">
+                <option value="google-sat">Google Satellite (3D)</option>
+                <option value="google-hybrid">Google Hybrid (3D)</option>
+                <option value="osm">OpenStreetMap (3D)</option>
+                <option value="carto-dark">CartoDB Dark (3D)</option>
+                <option value="esri-imagery">Esri World Imagery (3D)</option>
+            </select>
+        </div>
+
+        <!-- پنل ۲D سمت راست -->
         <div id="map"></div>
     </div>
 
