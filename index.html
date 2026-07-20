@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>سامانه ردیابی زنده پروازها | WebGIS</title>
+    <title>سامانه ردیابی زنده پروازها | WebGIS ADS-B</title>
     
     <!-- CDN خودکار کتابخانه‌های CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -13,15 +13,15 @@
 <body>
 
     <div id="sidebar">
-        <h2><i class="fa-solid fa-plane-departure"></i> ردیاب پرواز OpenSky</h2>
-        <p>نمایش زنده موقعیت مکانی هواپیماها در حریم هوایی</p>
+        <h2><i class="fa-solid fa-plane-departure"></i> ردیاب پرواز ADS-B Live</h2>
+        <p>نمایش زنده موقعیت مکانی و مسیر هواپیماها</p>
         <hr>
         <div class="stats-box">
             <span>تعداد پروازهای فعال:</span>
             <strong id="flight-count">0</strong>
         </div>
         <div class="info-box">
-            <p><small>* داده‌ها هر ۱۰ ثانیه به روزرسانی می‌شوند.</small></p>
+            <p><small>* داده‌ها از شبکه زنده ADS-B دریافت می‌شوند.</small></p>
         </div>
     </div>
 
