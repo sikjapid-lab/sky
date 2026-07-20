@@ -3,91 +3,125 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>سامانه پیشرفته پایش ترافیک هوایی WebGIS</title>
+    <title>مرکز پایش و شبیه‌سازی هوایی ADSB</title>
     
+    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- CesiumJS CSS -->
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" />
+    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
-    <link rel="stylesheet" href="css/style.css">
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #0b0f19; color: #fff; }
+
+        /* نوار افقی بالای نقشه */
+        #top-bar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            height: 55px;
+            z-index: 2000;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .brand-title { display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 0.95rem; color: #38bdf8; }
+        .controls-group { display: flex; align-items: center; gap: 12px; }
+
+        .input-box {
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            outline: none;
+        }
+
+        .btn-action {
+            background: #0284c7;
+            color: #fff;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+        .btn-action:hover { background: #0369a1; }
+        .btn-3d { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
+        .btn-3d:hover { background: linear-gradient(135deg, #7c3aed, #4f46e5); }
+
+        .stat-badge { font-size: 0.8rem; color: #94a3b8; }
+        .stat-badge span { color: #4ade80; font-weight: bold; }
+
+        /* کانتینر نقشه‌ها */
+        #map, #cesiumContainer { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        #cesiumContainer { display: none; z-index: 1000; }
+
+        /* پنل دوربین ۳D */
+        #camera-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 2000;
+            display: none;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            gap: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
 </head>
 <body>
 
-    <!-- سایدبار اصلی -->
-    <div id="sidebar">
-        <div class="sidebar-header">
-            <h2><i class="fa-solid fa-radar"></i> مرکز پایش هوایی ADSB</h2>
-            <p>نمایش زنده ترافیک پروازی جهانی</p>
-        </div>
-        <hr>
-        
-        <div class="search-box">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <input type="text" id="search-input" placeholder="جستجو (Callsign، Reg، Hex)..." oninput="filterFlights()">
+    <!-- نوار تنظیمات افقی -->
+    <div id="top-bar">
+        <div class="brand-title">
+            <i class="fa-solid fa-plane-radar fa-lg"></i>
+            <span>مرکز پایش هوایی ADSB</span>
         </div>
 
-        <div class="setting-item">
-            <label for="refresh-rate"><i class="fa-solid fa-rotate"></i> بروزرسانی (ثانیه):</label>
-            <input type="number" id="refresh-rate" value="5" min="2" max="60" onchange="updateInterval()">
-        </div>
+        <div class="controls-group">
+            <input type="text" id="search-input" class="input-box" placeholder="جستجو (Flight, Reg, Hex)..." onkeyup="filterFlights()">
+            
+            <div class="stat-badge">کل: <span id="flight-count">۰</span></div>
+            <div class="stat-badge">نمایشی: <span id="visible-count">۰</span></div>
 
-        <div class="stats-container">
-            <div class="stat-card">
-                <span>کل پروازها:</span>
-                <strong id="flight-count">0</strong>
-            </div>
-            <div class="stat-card">
-                <span>نمایشی:</span>
-                <strong id="visible-count">0</strong>
-            </div>
-        </div>
-
-        <div class="action-buttons">
-            <button onclick="toggleTable()"><i class="fa-solid fa-table-cells"></i> جدول پروازها</button>
-            <button onclick="clearTrails()"><i class="fa-solid fa-route"></i> پاکسازی مسیر</button>
+            <button class="btn-action" onclick="toggleTable()"><i class="fa-solid fa-table-list"></i> جدول</button>
+            <button class="btn-action" onclick="clearTrails()"><i class="fa-solid fa-eraser"></i> پاکسازی مسیر</button>
+            <button class="btn-action btn-3d" id="btn-toggle-3d" onclick="toggle3DMode()"><i class="fa-solid fa-cube"></i> حالت ۳D Glob</button>
         </div>
     </div>
 
-    <!-- راهنمای رنگ ارتفاع (Altitude Legend) مشابه ADSBExchange -->
-    <div id="altitude-legend">
-        <span>زمین</span>
-        <div class="legend-bar"></div>
-        <span>۴۵,۰۰۰+ ft</span>
+    <!-- کنترلرهای دوربین سزیوم -->
+    <div id="camera-controls">
+        <button class="btn-action" onclick="setCameraView('chase')"><i class="fa-solid fa-video"></i> دید تعقیبی</button>
+        <button class="btn-action" onclick="setCameraView('cockpit')"><i class="fa-solid fa-eye"></i> دید خلبان</button>
+        <button class="btn-action" onclick="setCameraView('free')"><i class="fa-solid fa-arrows-spin"></i> چرخش آزاد</button>
     </div>
 
-    <!-- جدول کشویی پایین -->
-    <div id="table-container" class="table-hidden">
-        <div class="table-header">
-            <h3><i class="fa-solid fa-list-check"></i> لیست کلیه پروازهای فعال</h3>
-            <button onclick="toggleTable()" class="close-btn"><i class="fa-solid fa-xmark"></i></button>
-        </div>
-        <div class="table-wrapper">
-            <table id="flights-table">
-                <thead>
-                    <tr>
-                        <th>Callsign</th>
-                        <th>Reg</th>
-                        <th>تایپ</th>
-                        <th>Hex ID</th>
-                        <th>ارتفاع (ft)</th>
-                        <th>سرعت (km/h)</th>
-                        <th>Squawk</th>
-                        <th>عملیات</th>
-                    </tr>
-                </thead>
-                <tbody id="table-body"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- نقشه اصلی -->
+    <!-- نقشه‌ها -->
     <div id="map"></div>
+    <div id="cesiumContainer"></div>
 
-    <!-- نوار وضعیت پایینی (مختصات و ویژگی‌های زنده) -->
-    <div id="status-bar">
-        <div id="mouse-position"><i class="fa-solid fa-location-crosshairs"></i> مختصات: -- , --</div>
-        <div id="map-zoom"><i class="fa-solid fa-magnifying-glass-plus"></i> زوم: --</div>
-    </div>
-
+    <!-- اسکریپت‌ها -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
