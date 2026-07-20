@@ -76,7 +76,7 @@ async function fetchLiveGlobalFlights() {
     const now = Date.now();
 
     // کش کلاینت: جلوگیری از ارسال درخواست تکراری اگر کمتر از ۳ ثانیه گذشته و جابه‌جایی رخ نداده باشد
-    if (currentKey === lastFetchedKey && (now - lastFetchTime) < 3000) {
+    if (currentKey === lastFetchedKey && (now - lastFetchTime) < 1200) {
         return;
     }
 
