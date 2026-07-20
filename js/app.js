@@ -1,14 +1,12 @@
 // ==========================================
-// ۱. لایه‌های نقشه پایه در Leaflet (2D)
+// ۱. لایه‌های نقشه پایه دوبعدی (Leaflet)
 // ==========================================
 const baseMaps = {
     "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
     "Google Hybrid": L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
-    "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 19, attribution: 'CARTO' }),
     "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: 'OSM' })
 };
 
-// ۲. مقداردهی اولیه Leaflet
 const map = L.map('map', {
     center: [30.0, 50.0],
     zoom: 5,
@@ -20,27 +18,26 @@ L.control.layers(baseMaps, null, { position: 'bottomleft' }).addTo(map);
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
 // ==========================================
-// ۳. مقداردهی Cesium (3D Globe شبیه Google Earth)
+// ۲. مقداردهی و بارگذاری لایه معتبر کره سه‌بعدی (Cesium Globe)
 // ==========================================
 let cesiumViewer = null;
-let is3DMode = false;
 let cesiumEntities = {};
-let trackedCesiumEntity = null;
+let isSyncing = false;
 
-async function initCesium() {
+function initCesium() {
     if (cesiumViewer) return;
-    
-    // ایجاد تایپ ماهواره‌ای باکیفیت Esri World Imagery به عنوان لایه اصلی زمین
-    const esriSatellite = new Cesium.UrlTemplateImageryProvider({
-        url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 19
+
+    // لایه کاشی‌های ماهواره‌ای استاندارد بدون نیاز به Token
+    const esriProvider = new Cesium.UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        maximumLevel: 18
     });
 
     cesiumViewer = new Cesium.Viewer('cesiumContainer', {
-        imageryProvider: esriSatellite, // تصویر ماهواره‌ای شبیه گوگل ارث
+        imageryProvider: esriProvider,
         animation: false,
         timeline: false,
-        baseLayerPicker: true,
+        baseLayerPicker: false,
         fullscreenButton: false,
         geocoder: false,
         sceneModePicker: false,
@@ -48,49 +45,97 @@ async function initCesium() {
         selectionIndicator: false
     });
 
-    // تنظیمات نور و جو کره زمین
-    cesiumViewer.scene.globe.enableLighting = true;
-    cesiumViewer.scene.skyAtmosphere.show = true;
+    cesiumViewer.scene.globe.enableLighting = false; // خاموش کردن افکت شب جهت شفافیت همیشگی زمین
 
-    // بارگذاری عوارض زمین (Terrain)
-    try {
-        const terrainProvider = await Cesium.createWorldTerrainAsync();
-        cesiumViewer.terrainProvider = terrainProvider;
-    } catch (e) {
-        console.warn("استفاده از حالت زمین مسطح به دلیل عدم بارگذاری Terrain API");
-    }
+    // همگام‌سازی حرکت دوربین Cesium با Leaflet
+    cesiumViewer.camera.percentageChanged = 0.01;
+    cesiumViewer.camera.changed.addEventListener(sync2DFrom3D);
 }
 
 // ==========================================
-// ۴. منطق دریافت داده‌های زنده پروازها
+// ۳. الگوریتم همگام‌سازی دوطرفه (Sync Engine)
+// ==========================================
+map.on('move', sync3DFrom2D);
+
+function sync3DFrom2D() {
+    if (!cesiumViewer || isSyncing) return;
+    isSyncing = true;
+
+    const center = map.getCenter();
+    const zoom = map.getZoom();
+    
+    // تبدیل سطح زوم Leaflet به ارتفاع دوربین Cesium
+    const altitude = 40000000 / Math.pow(2, zoom);
+
+    cesiumViewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(center.lng, center.lat, altitude)
+    });
+
+    setTimeout(() => { isSyncing = false; }, 50);
+}
+
+function sync2DFrom3D() {
+    if (!cesiumViewer || isSyncing) return;
+    isSyncing = true;
+
+    const cartographic = cesiumViewer.camera.positionCartographic;
+    const lat = Cesium.Math.toDegrees(cartographic.latitude);
+    const lng = Cesium.Math.toDegrees(cartographic.longitude);
+    const height = cartographic.height;
+
+    // تبدیل ارتفاع Cesium به زوم Leaflet
+    const zoom = Math.round(Math.log2(40000000 / height));
+
+    map.setView([lat, lng], Math.min(Math.max(zoom, 2), 18), { animate: false });
+
+    setTimeout(() => { isSyncing = false; }, 50);
+}
+
+// تغییر حالت‌های نمایش (دوبعدی / سه‌بعدی / دو پنله)
+function setContainerMode(mode) {
+    const container = document.getElementById('map-container');
+    document.querySelectorAll('.btn-mode').forEach(b => b.classList.remove('active'));
+
+    container.className = '';
+
+    if (mode === 'split') {
+        container.classList.add('view-split');
+        document.getElementById('btn-split').classList.add('active');
+    } else if (mode === '2d') {
+        container.classList.add('view-only-2d');
+        document.getElementById('btn-2d').classList.add('active');
+    } else if (mode === '3d') {
+        container.classList.add('view-only-3d');
+        document.getElementById('btn-3d').classList.add('active');
+    }
+
+    setTimeout(() => {
+        map.invalidateSize();
+        if (cesiumViewer) cesiumViewer.resize();
+    }, 200);
+}
+
+// ==========================================
+// ۴. دریافت و رندر داده‌های پرواز
 // ==========================================
 const aircraftMarkers = {};
-const flightTrails = {};
 let allFlightsData = [];
 let mainPollingTimer = null;
-let selectedHex = null;
-let currentFetchController = null;
-let lastFetchedKey = "";
-let lastFetchTime = 0;
-let currentFetchInterval = 4000;
 
 function getAltitudeColor(alt) {
     if (alt <= 0) return '#22c55e';
     if (alt < 10000) return '#84cc16';
     if (alt < 20000) return '#eab308';
     if (alt < 30000) return '#f97316';
-    if (alt < 40000) return '#a855f7';
-    return '#ec4899';
+    return '#a855f7';
 }
 
-function createPlaneIcon(heading, altFeet, isSelected = false) {
+function createPlaneIcon(heading, altFeet) {
     const angle = heading || 0;
-    const color = isSelected ? '#38bdf8' : getAltitudeColor(altFeet);
-    const size = isSelected ? '22px' : '16px';
-    const filterStyle = isSelected ? 'filter: drop-shadow(0 0 8px #38bdf8);' : 'filter: drop-shadow(0 0 2px rgba(0,0,0,0.9));';
+    const color = getAltitudeColor(altFeet);
 
     return L.divIcon({
-        html: `<i class="fa-solid fa-plane" style="transform: rotate(${angle - 45}deg); color: ${color}; font-size: ${size}; ${filterStyle}"></i>`,
+        html: `<i class="fa-solid fa-plane" style="transform: rotate(${angle - 45}deg); color: ${color}; font-size: 16px; filter: drop-shadow(0 0 3px #000);"></i>`,
         className: 'custom-plane-marker',
         iconSize: [20, 20],
         iconAnchor: [10, 10]
@@ -99,27 +144,13 @@ function createPlaneIcon(heading, altFeet, isSelected = false) {
 
 async function fetchLiveGlobalFlights() {
     const center = map.getCenter();
-    const lat = center.lat.toFixed(1);
-    const lon = center.lng.toFixed(1);
-    const currentKey = `${lat}_${lon}`;
-    const now = Date.now();
-
-    if (currentKey === lastFetchedKey && (now - lastFetchTime) < 3000) return;
-
-    if (currentFetchController) currentFetchController.abort();
-    currentFetchController = new AbortController();
-
     try {
-        const apiUrl = `/api/flights?lat=${lat}&lon=${lon}&dist=1200`;
-        const response = await fetch(apiUrl, { signal: currentFetchController.signal });
-
+        const apiUrl = `/api/flights?lat=${center.lat.toFixed(1)}&lon=${center.lng.toFixed(1)}&dist=1200`;
+        const response = await fetch(apiUrl);
         if (!response.ok) return;
 
         const data = await response.json();
         const rawAircraft = data.ac || [];
-
-        lastFetchedKey = currentKey;
-        lastFetchTime = Date.now();
 
         allFlightsData = rawAircraft.map(ac => ({
             hex: String(ac.hex || '').toUpperCase(),
@@ -137,66 +168,40 @@ async function fetchLiveGlobalFlights() {
         document.getElementById('flight-count').innerText = allFlightsData.length.toLocaleString('fa-IR');
 
         renderFlights2D(allFlightsData);
+        renderFlights3D(allFlightsData);
         updateTable(allFlightsData);
-        if (is3DMode) renderFlights3D(allFlightsData);
 
     } catch (error) {
-        if (error.name !== 'AbortError') console.error(error);
+        console.error(error);
     }
 }
 
-// ==========================================
-// ۵. رندر ۲D در Leaflet
-// ==========================================
 function renderFlights2D(flights) {
     const currentActiveHexes = new Set();
     const searchKeyword = document.getElementById('search-input').value.toLowerCase();
     let visibleCount = 0;
 
     flights.forEach(ac => {
-        if (ac.flight.toLowerCase().includes(searchKeyword) || ac.hex.toLowerCase().includes(searchKeyword) || ac.r.toLowerCase().includes(searchKeyword)) {
+        if (ac.flight.toLowerCase().includes(searchKeyword) || ac.hex.toLowerCase().includes(searchKeyword)) {
             visibleCount++;
             currentActiveHexes.add(ac.hex);
 
-            const popupContent = `
-                <div style="direction: rtl; font-family: Tahoma; font-size: 0.82rem; line-height: 1.6; color:#1e293b;">
-                    <h4 style="margin: 0 0 4px 0; color: #0284c7;">پرواز: ${ac.flight}</h4>
-                    <b>شناسه Reg:</b> ${ac.r}<br>
-                    <b>تایپ:</b> ${ac.type}<br>
-                    <b>ارتفاع:</b> ${ac.alt_feet.toLocaleString()} ft<br>
-                    <b>سرعت:</b> ${ac.speed} km/h<br>
-                    <b>Hex:</b> <code>${ac.hex}</code>
-                </div>
-            `;
+            const popupContent = `<b>پرواز: ${ac.flight}</b><br>ارتفاع: ${ac.alt_feet} ft<br>سرعت: ${ac.speed} km/h`;
 
             if (aircraftMarkers[ac.hex]) {
-                aircraftMarkers[ac.hex].marker.setLatLng([ac.lat, ac.lon]);
-                aircraftMarkers[ac.hex].marker.setIcon(createPlaneIcon(ac.track, ac.alt_feet, ac.hex === selectedHex));
-                aircraftMarkers[ac.hex].marker.getPopup().setContent(popupContent);
+                aircraftMarkers[ac.hex].setLatLng([ac.lat, ac.lon]);
+                aircraftMarkers[ac.hex].setIcon(createPlaneIcon(ac.track, ac.alt_feet));
             } else {
-                const marker = L.marker([ac.lat, ac.lon], { icon: createPlaneIcon(ac.track, ac.alt_feet, ac.hex === selectedHex) })
-                    .bindPopup(popupContent);
-                
-                marker.on('click', () => selectAircraft(ac.hex, ac.lat, ac.lon));
+                const marker = L.marker([ac.lat, ac.lon], { icon: createPlaneIcon(ac.track, ac.alt_feet) }).bindPopup(popupContent);
                 marker.addTo(map);
-                aircraftMarkers[ac.hex] = { marker };
+                aircraftMarkers[ac.hex] = marker;
             }
         }
     });
 
     document.getElementById('visible-count').innerText = visibleCount.toLocaleString('fa-IR');
-
-    Object.keys(aircraftMarkers).forEach(hex => {
-        if (!currentActiveHexes.has(hex)) {
-            map.removeLayer(aircraftMarkers[hex].marker);
-            delete aircraftMarkers[hex];
-        }
-    });
 }
 
-// ==========================================
-// ۶. رندر ۳D و تنظیمات پیشرفته موقعیت و دوربین
-// ==========================================
 function renderFlights3D(flights) {
     if (!cesiumViewer) return;
 
@@ -213,112 +218,34 @@ function renderFlights3D(flights) {
                 name: ac.flight,
                 position: position,
                 orientation: orientation,
-                // ساختار سه‌بعدی پرنده نقطه/آیکون با ارتفاع واقعی
-                point: {
-                    pixelSize: 10,
-                    color: Cesium.Color.fromCssColorString(getAltitudeColor(ac.alt_feet)),
-                    outlineColor: Cesium.Color.WHITE,
-                    outlineWidth: 2
-                },
-                label: {
-                    text: `${ac.flight}\n(${ac.alt_feet} ft)`,
-                    font: '13px sans-serif',
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    outlineWidth: 2,
-                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-                    pixelOffset: new Cesium.Cartesian2(0, -12)
-                }
+                point: { pixelSize: 8, color: Cesium.Color.fromCssColorString(getAltitudeColor(ac.alt_feet)) },
+                label: { text: ac.flight, font: '11px sans-serif', verticalOrigin: Cesium.VerticalOrigin.BOTTOM }
             });
         }
     });
 }
 
-// انتخاب هواپیما و تمرکز دقیق دوربین ماهواره‌ای ۳D
-function selectAircraft(hex, lat, lon) {
-    selectedHex = hex;
-    map.flyTo([lat, lon], 8);
-
-    if (is3DMode && cesiumEntities[hex]) {
-        trackedCesiumEntity = cesiumEntities[hex];
-        
-        // تنظیم Offset ملموس دوربین نسبت به محیط و ارتفاع زمین
-        cesiumViewer.trackedEntity = trackedCesiumEntity;
-        cesiumViewer.selectedEntity = trackedCesiumEntity;
-        
-        document.getElementById('camera-controls').style.display = 'flex';
-    }
-}
-
-// کنترل هوشمند دوربین ۳D
-function setCameraView(mode) {
-    if (!cesiumViewer || !trackedCesiumEntity) return;
-
-    if (mode === 'chase') {
-        // دید از پشت هواپیما با زاویه اریب نسبت به زمین
-        cesiumViewer.trackedEntity = trackedCesiumEntity;
-    } else if (mode === 'cockpit') {
-        // دید از زاویه دید خلبان
-        cesiumViewer.trackedEntity = undefined;
-        cesiumViewer.zoomTo(trackedCesiumEntity, new Cesium.HeadingPitchRange(
-            trackedCesiumEntity.orientation ? Cesium.Math.toRadians(0) : 0,
-            Cesium.Math.toRadians(-15), // شیب زوایه به سمت زمین
-            1500 // فاصله ۱۵۰۰ متری
-        ));
-    } else if (mode === 'free') {
-        // آزاد کردن دوربین جهت چرخش آزادانه کاربر با موس
-        cesiumViewer.trackedEntity = undefined;
-    }
-}
-
-async function toggle3DMode() {
-    is3DMode = !is3DMode;
-    const btn = document.getElementById('btn-toggle-3d');
-    const cesiumDiv = document.getElementById('cesiumContainer');
-
-    if (is3DMode) {
-        await initCesium();
-        cesiumDiv.style.display = 'block';
-        btn.innerHTML = `<i class="fa-solid fa-map"></i> حالت ۲D Map`;
-        document.getElementById('camera-controls').style.display = selectedHex ? 'flex' : 'none';
-        
-        // اگر هواپیمایی قبلاً انتخاب شده باشد، دوربین روی آن قفل می‌شود
-        if (selectedHex && cesiumEntities[selectedHex]) {
-            selectAircraft(selectedHex, 0, 0);
-        } else {
-            // پرواز اولیه کره زمین به مرکز ایران و خلیج فارس
-            cesiumViewer.camera.flyTo({
-                destination: Cesium.Cartesian3.fromDegrees(50.0, 30.0, 2000000)
-            });
-        }
-        
-        renderFlights3D(allFlightsData);
-    } else {
-        cesiumDiv.style.display = 'none';
-        btn.innerHTML = `<i class="fa-solid fa-cube"></i> حالت ۳D Glob`;
-        document.getElementById('camera-controls').style.display = 'none';
-    }
-}
-
-// ==========================================
-// ۷. مدیریت جدول پروازها
-// ==========================================
 function updateTable(flights) {
     const tbody = document.getElementById('table-body');
     if (!tbody) return;
     tbody.innerHTML = '';
-    flights.slice(0, 100).forEach(ac => {
+    flights.slice(0, 50).forEach(ac => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><b>${ac.flight}</b></td>
             <td>${ac.r}</td>
             <td>${ac.type}</td>
             <td><code>${ac.hex}</code></td>
-            <td><span style="color:${getAltitudeColor(ac.alt_feet)}">${ac.alt_feet.toLocaleString()}</span></td>
+            <td>${ac.alt_feet.toLocaleString()}</td>
             <td>${ac.speed}</td>
-            <td><button onclick="selectAircraft('${ac.hex}', ${ac.lat}, ${ac.lon})" style="background:#0284c7; color:#fff; border:none; padding:3px 8px; border-radius:4px; cursor:pointer;">تمرکز</button></td>
+            <td><button onclick="focusAircraft(${ac.lat}, ${ac.lon})" style="background:#0284c7; color:#fff; border:none; padding:2px 6px; border-radius:4px; cursor:pointer;">تمرکز</button></td>
         `;
         tbody.appendChild(tr);
     });
+}
+
+function focusAircraft(lat, lon) {
+    map.flyTo([lat, lon], 9);
 }
 
 function toggleTable() {
@@ -326,15 +253,8 @@ function toggleTable() {
 }
 
 function filterFlights() { renderFlights2D(allFlightsData); }
-function clearTrails() { Object.keys(flightTrails).forEach(k => flightTrails[k] = []); }
 
-function startSinglePollingLoop() {
-    clearTimeout(mainPollingTimer);
-    const loop = async () => {
-        await fetchLiveGlobalFlights();
-        mainPollingTimer = setTimeout(loop, currentFetchInterval);
-    };
-    loop();
-}
-
-startSinglePollingLoop();ر
+// راه اندازی
+initCesium();
+fetchLiveGlobalFlights();
+setInterval(fetchLiveGlobalFlights, 4000);
