@@ -1,4 +1,3 @@
-// لایه‌های نقشه پایه
 const baseMaps = {
     "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
     "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CARTO', subdomains: 'abcd', maxZoom: 19 })
@@ -14,7 +13,6 @@ const map = L.map('map', {
 L.control.layers(baseMaps, null, { position: 'topleft' }).addTo(map);
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-// محاسبه رنگ هواپیما بر اساس ارتفاع (ft)
 function getAltitudeColor(alt) {
     if (alt <= 0) return '#22c55e';
     if (alt < 10000) return '#84cc16';
@@ -28,7 +26,9 @@ const aircraftMarkers = {};
 const flightTrails = {};
 let allFlightsData = [];
 let updateTimer = null;
+let moveDebounceTimer = null;
 let selectedHex = null;
+let currentFetchController = null; // جهت لغو درخواست‌های قدیمی
 
 function createPlaneIcon(heading, altFeet, isSelected = false) {
     const angle = heading || 0;
@@ -44,17 +44,28 @@ function createPlaneIcon(heading, altFeet, isSelected = false) {
     });
 }
 
-// واکشی داده‌های زنده از طریق پروکسی Vercel
+// واکشی داده‌های زنده با کنترل همزمانی و لغو درخواست پیشین
 async function fetchLiveGlobalFlights() {
+    // لغو درخواست قبلی در صورت معلق بودن
+    if (currentFetchController) {
+        currentFetchController.abort();
+    }
+    currentFetchController = new AbortController();
+
     try {
         const center = map.getCenter();
         const lat = center.lat.toFixed(2);
         const lon = center.lng.toFixed(2);
 
-        // فراخوانی پروکسی Vercel
         const apiUrl = `/api/flights?lat=${lat}&lon=${lon}&dist=3000`;
 
-        const response = await fetch(apiUrl);
+        const response = await fetch(apiUrl, { signal: currentFetchController.signal });
+        
+        if (response.status === 429) {
+            console.warn('محدودیت تعداد درخواست! دریافت داده‌ها متوقف شد.');
+            return;
+        }
+
         if (!response.ok) return;
 
         const data = await response.json();
@@ -81,7 +92,9 @@ async function fetchLiveGlobalFlights() {
         updateTable(allFlightsData);
 
     } catch (error) {
-        console.error('خطا در دریافت داده‌های زنده پرواز:', error);
+        if (error.name !== 'AbortError') {
+            console.error('خطا در دریافت داده‌های زنده:', error);
+        }
     }
 }
 
@@ -170,8 +183,14 @@ function selectAircraft(hex, lat, lon) {
     });
 }
 
-// واکشی مجدد با حرکت نقشه
-map.on('moveend', fetchLiveGlobalFlights);
+// مدیریت بهینه حرکت روی نقشه با Debounce (تاخیر ۷۰۰ میلی‌ثانیه‌ای پس از توقف حرکت)
+map.on('moveend', function () {
+    clearTimeout(moveDebounceTimer);
+    moveDebounceTimer = setTimeout(() => {
+        fetchLiveGlobalFlights();
+        updateInterval(); // ریست کردن تایمر ۵ ثانیه‌ای پس از جابه‌جایی دستی
+    }, 700);
+});
 
 map.on('mousemove', function (e) {
     const mousePosEl = document.getElementById('mouse-position');
