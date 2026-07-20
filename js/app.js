@@ -1,74 +1,78 @@
-// ۱. لایه‌های متعدد نقشه
+// لایه‌های نقشه
 const baseMaps = {
-    "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-        maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google'
-    }),
-    "Google Hybrid": L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
-        maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google'
-    }),
-    "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: 'CARTO', subdomains: 'abcd', maxZoom: 19
-    }),
-    "Esri Imagery": L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Esri'
-    }),
-    "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: 'OSM'
-    })
+    "Google Satellite": L.tileLayer('https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], attribution: 'Google' }),
+    "CartoDB Dark": L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: 'CARTO', subdomains: 'abcd', maxZoom: 19 })
 };
 
-// ساخت نقشه
 const map = L.map('map', {
-    center: [32.4279, 53.6880],
-    zoom: 5,
-    layers: [baseMaps["CartoDB Dark"]],
-    zoomControl: false // انتقال کنترل زوم در صورت نیاز
+    center: [30.0, 10.0],
+    zoom: 3,
+    layers: [baseMaps["Google Satellite"]],
+    zoomControl: false
 });
 
-// افزودن کنترل لایه‌ها (به سمت چپ بالا منتقل شده در CSS)
 L.control.layers(baseMaps, null, { position: 'topleft' }).addTo(map);
 L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
-// محاسبه رنگ بر اساس ارتفاع پرواز (مشابه ADSBExchange)
+// محاسبه رنگ بر اساس ارتفاع (ft)
 function getAltitudeColor(alt) {
-    if (alt <= 0) return '#22c55e';       // روی زمین (سبز)
-    if (alt < 10000) return '#84cc16';   // ارتفاع پایین (سبز کم‌رنگ)
-    if (alt < 20000) return '#eab308';   // ارتفاع متوسط (زرد)
-    if (alt < 30000) return '#f97316';   // ارتفاع بالا (نارنجی)
-    if (alt < 40000) return '#a855f7';   // کروز (بنفش)
-    return '#ec4899';                    // ارتفاع خیلی بالا (صورتی)
+    if (alt <= 0) return '#22c55e';
+    if (alt < 10000) return '#84cc16';
+    if (alt < 20000) return '#eab308';
+    if (alt < 30000) return '#f97316';
+    if (alt < 40000) return '#a855f7';
+    return '#ec4899';
 }
 
-// متغیرهای سیستم
 const aircraftMarkers = {};
 const flightTrails = {};
 let allFlightsData = [];
 let updateTimer = null;
 let selectedHex = null;
 
-// آیکون هواپیما با جهت و رنگ اختصاصی ارتفاع
 function createPlaneIcon(heading, altFeet, isSelected = false) {
     const angle = heading || 0;
     const color = isSelected ? '#38bdf8' : getAltitudeColor(altFeet);
-    const size = isSelected ? '24px' : '18px';
+    const size = isSelected ? '22px' : '16px';
     const borderWidth = isSelected ? 'filter: drop-shadow(0 0 6px #38bdf8);' : 'filter: drop-shadow(0 0 2px rgba(0,0,0,0.9));';
 
     return L.divIcon({
-        html: `<i class="fa-solid fa-plane" style="transform: rotate(${angle - 45}deg); color: ${color}; font-size: ${size}; ${borderWidth} transition: all 0.2s;"></i>`,
+        html: `<i class="fa-solid fa-plane" style="transform: rotate(${angle - 45}deg); color: ${color}; font-size: ${size}; ${borderWidth}"></i>`,
         className: 'custom-plane-marker',
         iconSize: [20, 20],
         iconAnchor: [10, 10]
     });
 }
 
-// دریافت داده‌ها از JSON
-async function fetchLocalFlightData() {
+// واکشی زنده داده‌ها از API جهانی مستقیماً در مرورگر
+async function fetchLiveGlobalFlights() {
     try {
-        const response = await fetch('./data/flights.json?t=' + new Date().getTime());
+        // دریافت پروازها بر اساس مرکز نمایشی نقشه کاربر جهت سرعت بالای بارگذاری
+        const center = map.getCenter();
+        const bounds = map.getBounds();
+        
+        // فراخوانی مستقیم API با شعاع پوششی وسیع بر اساس موقعیت فعلی کاربر روی نقشه
+        const apiUrl = `https://api.adsb.lol/v2/lat/${center.lat.toFixed(2)}/lon/${center.lng.toFixed(2)}/dist/3000`;
+
+        const response = await fetch(apiUrl);
         if (!response.ok) return;
 
         const data = await response.json();
-        allFlightsData = data.flights || [];
+        const rawAircraft = data.ac || [];
+
+        allFlightsData = rawAircraft.map(ac => ({
+            hex: String(ac.hex || '').toUpperCase(),
+            flight: String(ac.flight || 'N/A').trim(),
+            lat: ac.lat,
+            lon: ac.lon,
+            alt_feet: typeof ac.alt_baro === 'number' ? ac.alt_baro : 0,
+            speed: roundNumber((ac.gs || 0) * 1.852),
+            vspeed: ac.baro_rate || 0,
+            track: ac.track || 0,
+            type: String(ac.t || 'UNK').trim(),
+            squawk: String(ac.squawk || 'N/A').trim(),
+            r: String(ac.r || 'N/A').trim()
+        })).filter(ac => ac.lat && ac.lon);
 
         document.getElementById('flight-count').innerText = allFlightsData.length.toLocaleString('fa-IR');
 
@@ -76,11 +80,12 @@ async function fetchLocalFlightData() {
         updateTable(allFlightsData);
 
     } catch (error) {
-        console.error('Error:', error);
+        console.error('مواجهه با خطا در واکشی داده‌های زنده:', error);
     }
 }
 
-// رندر پروازها
+function roundNumber(num) { return Math.round(num); }
+
 function renderFlights(flights) {
     const currentActiveHexes = new Set();
     const searchKeyword = document.getElementById('search-input').value.toLowerCase();
@@ -88,61 +93,52 @@ function renderFlights(flights) {
 
     flights.forEach(ac => {
         const hex = ac.hex;
-        const flight = ac.flight;
         const lat = ac.lat;
         const lon = ac.lon;
-        const track = ac.track;
-        const alt = ac.alt_feet;
 
-        const matchesSearch = flight.toLowerCase().includes(searchKeyword) || 
+        const matchesSearch = ac.flight.toLowerCase().includes(searchKeyword) || 
                               hex.toLowerCase().includes(searchKeyword) || 
                               ac.r.toLowerCase().includes(searchKeyword) ||
                               ac.type.toLowerCase().includes(searchKeyword);
 
-        if (lat && lon && matchesSearch) {
+        if (matchesSearch) {
             visibleCount++;
             currentActiveHexes.add(hex);
 
-            // ذخیره مسیر
             if (!flightTrails[hex]) flightTrails[hex] = [];
             flightTrails[hex].push([lat, lon]);
-            if (flightTrails[hex].length > 25) flightTrails[hex].shift();
+            if (flightTrails[hex].length > 20) flightTrails[hex].shift();
 
             const popupContent = `
-                <div style="direction: rtl; font-family: Tahoma; font-size: 0.85rem; line-height: 1.6;">
-                    <h4 style="margin: 0 0 4px 0; color: #0284c7;">پرواز: ${flight}</h4>
+                <div style="direction: rtl; font-family: Tahoma; font-size: 0.82rem; line-height: 1.6;">
+                    <h4 style="margin: 0 0 4px 0; color: #0284c7;">پرواز: ${ac.flight}</h4>
                     <b>شناسه Reg:</b> ${ac.r}<br>
-                    <b>تایپ هواپیما:</b> ${ac.type}<br>
-                    <b>ارتفاع:</b> ${alt.toLocaleString()} ft (${Math.round(alt * 0.3048)} m)<br>
-                    <b>سرعت زمینی:</b> ${ac.speed} km/h<br>
-                    <b>سرعت عمودی:</b> ${ac.vspeed} ft/min<br>
+                    <b>تایپ:</b> ${ac.type}<br>
+                    <b>ارتفاع:</b> ${ac.alt_feet.toLocaleString()} ft<br>
+                    <b>سرعت:</b> ${ac.speed} km/h<br>
                     <b>Squawk:</b> ${ac.squawk}<br>
-                    <b>کد Hex:</b> <code>${hex}</code>
+                    <b>Hex:</b> <code>${hex}</code>
                 </div>
             `;
 
             if (aircraftMarkers[hex]) {
                 aircraftMarkers[hex].marker.setLatLng([lat, lon]);
-                aircraftMarkers[hex].marker.setIcon(createPlaneIcon(track, alt, hex === selectedHex));
+                aircraftMarkers[hex].marker.setIcon(createPlaneIcon(ac.track, ac.alt_feet, hex === selectedHex));
                 aircraftMarkers[hex].marker.getPopup().setContent(popupContent);
-                
-                if (aircraftMarkers[hex].polyline) {
-                    aircraftMarkers[hex].polyline.setLatLngs(flightTrails[hex]);
-                }
+                if (aircraftMarkers[hex].polyline) aircraftMarkers[hex].polyline.setLatLngs(flightTrails[hex]);
             } else {
                 const marker = L.marker([lat, lon], {
-                    icon: createPlaneIcon(track, alt, hex === selectedHex)
+                    icon: createPlaneIcon(ac.track, ac.alt_feet, hex === selectedHex)
                 }).bindPopup(popupContent);
 
                 const polyline = L.polyline(flightTrails[hex], {
-                    color: getAltitudeColor(alt),
+                    color: getAltitudeColor(ac.alt_feet),
                     weight: 2,
-                    opacity: 0.8,
-                    dashArray: '3, 4'
+                    opacity: 0.85,
+                    dashArray: '3, 3'
                 });
 
                 marker.on('click', () => selectAircraft(hex, lat, lon));
-
                 marker.addTo(map);
                 aircraftMarkers[hex] = { marker, polyline };
             }
@@ -151,7 +147,6 @@ function renderFlights(flights) {
 
     document.getElementById('visible-count').innerText = visibleCount.toLocaleString('fa-IR');
 
-    // پاکسازی موارد خارج شده
     Object.keys(aircraftMarkers).forEach(hex => {
         if (!currentActiveHexes.has(hex)) {
             map.removeLayer(aircraftMarkers[hex].marker);
@@ -161,41 +156,34 @@ function renderFlights(flights) {
     });
 }
 
-// انتخاب پرواز
 function selectAircraft(hex, lat, lon) {
     selectedHex = hex;
-    map.flyTo([lat, lon], 8, { duration: 1.2 });
+    map.flyTo([lat, lon], 7, { duration: 1 });
     
     Object.keys(aircraftMarkers).forEach(h => {
         if (h === hex) {
             aircraftMarkers[h].polyline.addTo(map);
-            const ac = allFlightsData.find(a => a.hex === hex);
-            if (ac) aircraftMarkers[h].marker.setIcon(createPlaneIcon(ac.track, ac.alt_feet, true));
         } else {
-            if (map.hasLayer(aircraftMarkers[h].polyline)) {
-                map.removeLayer(aircraftMarkers[h].polyline);
-            }
+            if (map.hasLayer(aircraftMarkers[h].polyline)) map.removeLayer(aircraftMarkers[h].polyline);
         }
     });
 }
 
-// نمایش مختصات و خصوصیات زنده در نوار پایینی
+// تغییر زاویه دید نقشه باعث دریافت داده‌های زنده همان منطقه می‌شود
+map.on('moveend', fetchLiveGlobalFlights);
+
 map.on('mousemove', function (e) {
-    const lat = e.latlng.lat.toFixed(5);
-    const lng = e.latlng.lng.toFixed(5);
-    document.getElementById('mouse-position').innerHTML = `<i class="fa-solid fa-location-crosshairs"></i> مختصات: Lat: ${lat}, Lon: ${lng}`;
+    document.getElementById('mouse-position').innerHTML = `<i class="fa-solid fa-location-crosshairs"></i> مختصات: Lat: ${e.latlng.lat.toFixed(4)}, Lon: ${e.latlng.lng.toFixed(4)}`;
 });
 
 map.on('zoomend', function () {
     document.getElementById('map-zoom').innerHTML = `<i class="fa-solid fa-magnifying-glass-plus"></i> زوم: ${map.getZoom()}`;
 });
 
-// بروزرسانی جدول
 function updateTable(flights) {
     const tbody = document.getElementById('table-body');
     tbody.innerHTML = '';
-
-    flights.slice(0, 80).forEach(ac => {
+    flights.slice(0, 100).forEach(ac => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td><b>${ac.flight}</b></td>
@@ -212,11 +200,13 @@ function updateTable(flights) {
 }
 
 function filterFlights() { renderFlights(allFlightsData); }
+
 function updateInterval() {
     const seconds = parseInt(document.getElementById('refresh-rate').value) || 5;
     clearInterval(updateTimer);
-    updateTimer = setInterval(fetchLocalFlightData, seconds * 1000);
+    updateTimer = setInterval(fetchLiveGlobalFlights, seconds * 1000);
 }
+
 function toggleTable() { document.getElementById('table-container').classList.toggle('table-hidden'); }
 function clearTrails() {
     Object.keys(flightTrails).forEach(k => flightTrails[k] = []);
@@ -225,6 +215,6 @@ function clearTrails() {
     });
 }
 
-// شروع
-fetchLocalFlightData();
+// شروع واکشی زنده
+fetchLiveGlobalFlights();
 updateInterval();
