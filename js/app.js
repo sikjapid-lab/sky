@@ -1,80 +1,102 @@
-// تنظیمات اولیه نقشه (تمرکز اولیه روی خاورمیانه / ایران)
-const map = L.map('map').setView([32.4279, 53.6880], 5);
+// تنظیمات اولیه نقشه روی مرکز ایران
+const CENTER_LAT = 32.4279;
+const CENTER_LON = 53.6880;
+const RADIUS_NAUTICAL_MILES = 1200; // شعاع پوشش (حدود ۲۰۰۰ کیلومتر برای پوشش کامل ایران و خاورمیانه)
 
-// افزودن لایه نقشه CartoDB Dark (مناسب ترافیک هوایی)
+const map = L.map('map').setView([CENTER_LAT, CENTER_LON], 5);
+
+// افزودن لایه نقشه تاریک و حرفه‌ای CartoDB
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
     subdomains: 'abcd',
     maxZoom: 19
 }).addTo(map);
 
-// ذخیره مارکرها برای مدیریت و بروزرسانی
+// شیء ذخیره مارکرهای روی نقشه
 const aircraftMarkers = {};
 
-// تابع ساخت آیکون هواپیما با زاویه حرکت مشخص
+// تابع ساخت آیکون هواپیما با زاویه حرکت (Heading/Track)
 function createPlaneIcon(heading) {
+    const angle = heading || 0;
     return L.divIcon({
-        html: `<i class="fa-solid fa-plane plane-icon" style="transform: rotate(${heading - 45}deg); color: #38bdf8; font-size: 18px;"></i>`,
+        html: `<i class="fa-solid fa-plane plane-icon" style="transform: rotate(${angle - 45}deg); color: #38bdf8; font-size: 20px; filter: drop-shadow(0 0 3px #0284c7);"></i>`,
         className: 'custom-plane-marker',
-        iconSize: [20, 20],
-        iconAnchor: [10, 10]
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
     });
 }
 
-// دریافت داده‌ها از API رایگان OpenSky Network
+// تابع اصلی دریافت داده‌های ADS-B از سرویس آزاد و بدون CORS
 async function fetchFlightData() {
     try {
-        // دریافت تمام پروازهای فعال
-        const response = await fetch('https://opensky-network.org/api/states/all');
-        if (!response.ok) throw new Error('خطا در دریافت داده‌ها');
+        const url = `https://api.adsb.lol/v2/lat/${CENTER_LAT}/lon/${CENTER_LON}/dist/${RADIUS_NAUTICAL_MILES}`;
+        const response = await fetch(url);
+        
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         
         const data = await response.json();
-        const states = data.states || [];
+        const aircraftList = data.ac || [];
 
-        // بروزرسانی آمار
-        document.getElementById('flight-count').innerText = states.length.toLocaleString('fa-IR');
+        // بروزرسانی شمارنده پروازها
+        document.getElementById('flight-count').innerText = aircraftList.length.toLocaleString('fa-IR');
 
-        // پیمایش پروازها (جهت بهینه‌سازی فقط پروازهای دارای مختصات نمایش داده می‌شوند)
-        states.forEach(flight => {
-            const icao24 = flight[0];
-            const callsign = flight[1] ? flight[1].trim() : 'Unknown';
-            const country = flight[2];
-            const longitude = flight[5];
-            const latitude = flight[6];
-            const altitude = flight[7] ? Math.round(flight[7]) : 'N/A';
-            const heading = flight[10] || 0;
+        // مجموعه‌ای از icao24های فعال در این درخواست برای پاکسازی هواپیماهای خارج شده
+        const currentActiveHexes = new Set();
 
-            if (latitude && longitude) {
+        aircraftList.forEach(aircraft => {
+            const hex = aircraft.hex;
+            const flight = aircraft.flight ? aircraft.flight.trim() : 'N/A';
+            const lat = aircraft.lat;
+            const lon = aircraft.lon;
+            const altFeet = aircraft.alt_baro || aircraft.alt_geom || 'N/A';
+            const altMeters = typeof altFeet === 'number' ? Math.round(altFeet * 0.3048) : 'N/A';
+            const speed = aircraft.gs ? Math.round(aircraft.gs * 1.852) : 'N/A'; // تبدیل گره به کیلومتر بر ساعت
+            const track = aircraft.track || 0;
+            const type = aircraft.t || 'نامشخص';
+
+            if (lat && lon) {
+                currentActiveHexes.add(hex);
+
                 const popupContent = `
-                    <div style="direction: rtl; font-family: Tahoma;">
-                        <strong>کد پرواز:</strong> ${callsign}<br>
-                        <strong>کشور:</strong> ${country}<br>
-                        <strong>ارتفاع:</strong> ${altitude} متر<br>
-                        <strong>کد شناسه:</strong> ${icao24}
+                    <div style="direction: rtl; font-family: Tahoma, sans-serif; line-height: 1.6;">
+                        <h4 style="margin: 0 0 5px 0; color: #0284c7;">پرواز: ${flight}</h4>
+                        <strong>نوع تایپ:</strong> ${type}<br>
+                        <strong>ارتفاع:</strong> ${altMeters} متر (${altFeet} پا)<br>
+                        <strong>سرعت:</strong> ${speed} km/h<br>
+                        <strong>شناسه Hex:</strong> <code style="background: #e2e8f0; padding: 2px 4px; border-radius: 4px;">${hex.toUpperCase()}</code>
                     </div>
                 `;
 
-                if (aircraftMarkers[icao24]) {
+                if (aircraftMarkers[hex]) {
                     // بروزرسانی موقعیت هواپیمای موجود
-                    aircraftMarkers[icao24].setLatLng([latitude, longitude]);
-                    aircraftMarkers[icao24].setIcon(createPlaneIcon(heading));
-                    aircraftMarkers[icao24].setPopupContent(popupContent);
+                    aircraftMarkers[hex].setLatLng([lat, lon]);
+                    aircraftMarkers[hex].setIcon(createPlaneIcon(track));
+                    aircraftMarkers[hex].getPopup().setContent(popupContent);
                 } else {
-                    // افزودن هواپیمای جدید
-                    const marker = L.marker([latitude, longitude], {
-                        icon: createPlaneIcon(heading)
+                    // افزودن هواپیمای جدید به نقشه
+                    const marker = L.marker([lat, lon], {
+                        icon: createPlaneIcon(track)
                     }).bindPopup(popupContent);
                     
                     marker.addTo(map);
-                    aircraftMarkers[icao24] = marker;
+                    aircraftMarkers[hex] = marker;
                 }
             }
         });
+
+        // حذف هواپیماهایی که دیگر در حریم هوایی نیستند
+        Object.keys(aircraftMarkers).forEach(hex => {
+            if (!currentActiveHexes.has(hex)) {
+                map.removeLayer(aircraftMarkers[hex]);
+                delete aircraftMarkers[hex];
+            }
+        });
+
     } catch (error) {
-        console.error('OpenSky Fetch Error:', error);
+        console.error('ADS-B Fetch Error:', error);
     }
 }
 
-// اجرای اولیه و تنظیم تایمر ۱۰ ثانیه‌ای
+// فراخوانی اولیه و تنظیم بازه بروزرسانی هر ۵ ثانیه
 fetchFlightData();
-setInterval(fetchFlightData, 10000);
+setInterval(fetchFlightData, 5000);
