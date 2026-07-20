@@ -2,44 +2,40 @@ import requests
 import json
 import os
 
-# تنظیمات مرکز ایران و محدوده پوشش
-CENTER_LAT = 32.4279
-CENTER_LON = 53.6880
-RADIUS_NAUTICAL_MILES = 1000
+# آدرس دریافت تمام پروازهای جهانی از endpoint اختصاصی
+URL = "https://api.adsb.lol/v2/ladd" # یا v2/all جهت دریافت پوشش جهانی کلی
 
-# آدرس API بدون نیاز به پروکسی (در پایتون CORS وجود ندارد)
-URL = f"https://api.adsb.lol/v2/lat/{CENTER_LAT}/lon/{CENTER_LON}/dist/{RADIUS_NAUTICAL_MILES}"
-
-def update_flights_data():
+def fetch_global_flights():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(URL, headers=headers, timeout=10)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        # در صورت عدم دسترسی به ladd، از endpoint شعاع کامل استفاده می‌شود
+        fallback_url = "https://api.adsb.lol/v2/lat/20.0/lon/30.0/dist/9000"
+        
+        response = requests.get(fallback_url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
             aircraft_list = data.get('ac', [])
             
-            # فیلتر و بهینه‌سازی حجم داده‌ها برای فرانت‌اند
             processed_flights = []
             for ac in aircraft_list:
                 lat = ac.get('lat')
                 lon = ac.get('lon')
-                if lat and lon:
+                if lat is not None and lon is not None:
                     processed_flights.append({
-                        'hex': ac.get('hex'),
+                        'hex': ac.get('hex', '').strip(),
                         'flight': (ac.get('flight') or 'N/A').strip(),
                         'lat': lat,
                         'lon': lon,
                         'alt_feet': ac.get('alt_baro') or ac.get('alt_geom') or 0,
-                        'speed': round((ac.get('gs') or 0) * 1.852), # تبدیل به km/h
+                        'speed': round((ac.get('gs') or 0) * 1.852), # km/h
+                        'vspeed': ac.get('baro_rate', 0), # سرعت صعود/نزول
                         'track': ac.get('track', 0),
-                        'type': ac.get('t', 'نامشخص')
+                        'type': ac.get('t', 'نامشخص'),
+                        'squawk': ac.get('squawk', 'N/A')
                     })
             
-            # مطمئن شدن از وجود پوشه data
             os.makedirs('data', exist_ok=True)
-            
-            # ذخیره درون فایل JSON
             with open('data/flights.json', 'w', encoding='utf-8') as f:
                 json.dump({
                     'updated_at': data.get('now'),
@@ -47,12 +43,12 @@ def update_flights_data():
                     'flights': processed_flights
                 }, f, ensure_ascii=False, indent=2)
                 
-            print(f"Successfully updated {len(processed_flights)} flights.")
+            print(f"Successfully saved {len(processed_flights)} global flights.")
         else:
-            print(f"Failed to fetch data. Status code: {response.status_code}")
+            print(f"Error fetching data: {response.status_code}")
 
     except Exception as e:
-        print(f"Error occurred: {e}")
+        print(f"Exception: {e}")
 
 if __name__ == "__main__":
-    update_flights_data()
+    fetch_global_flights()
